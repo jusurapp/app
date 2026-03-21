@@ -79,13 +79,14 @@ jobs:
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install ffmpeg@7 cmake llvm pkg-config
+          brew install ffmpeg@7 cmake pkg-config
           FFMPEG_PREFIX=$(brew --prefix ffmpeg@7)
           SDKROOT=$(xcrun --show-sdk-path)
           echo "PKG_CONFIG_PATH=${FFMPEG_PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
           echo "FFMPEG_DIR=${FFMPEG_PREFIX}" >> $GITHUB_ENV
           echo "SDKROOT=${SDKROOT}" >> $GITHUB_ENV
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I${FFMPEG_PREFIX}/include -isysroot ${SDKROOT}" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64-apple-darwin=-I${FFMPEG_PREFIX}/include -isysroot ${SDKROOT}" >> $GITHUB_ENV
 
       # Windows dependencies
       - name: Install FFmpeg (Windows)
