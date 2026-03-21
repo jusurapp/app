@@ -51,6 +51,8 @@ jobs:
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
@@ -69,16 +71,17 @@ jobs:
             libavdevice-dev \
             libswscale-dev \
             libswresample-dev \
-            libvulkan-dev \
-            vulkan-tools
+            vulkan-sdk
 
       # macOS dependencies
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
           brew install ffmpeg cmake llvm
-          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
-          echo "FFMPEG_DIR=$(brew --prefix ffmpeg)" >> $GITHUB_ENV
+          FFMPEG_PREFIX=$(brew --prefix ffmpeg)
+          echo "PKG_CONFIG_PATH=${FFMPEG_PREFIX}/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
+          echo "FFMPEG_DIR=${FFMPEG_PREFIX}" >> $GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I${FFMPEG_PREFIX}/include" >> $GITHUB_ENV
 
       # Windows dependencies
       - name: Install FFmpeg (Windows)
@@ -92,7 +95,6 @@ jobs:
           $ffdir = "C:\ffmpeg-build\ffmpeg-$FFMPEG_VER-full_build-shared"
           echo "FFMPEG_DIR=$ffdir" >> $env:GITHUB_ENV
           echo "$ffdir\bin" >> $env:GITHUB_PATH
-          echo "FFMPEG_PKG_CONFIG_PATH=$ffdir\lib\pkgconfig" >> $env:GITHUB_ENV
 
       - name: Install LLVM (Windows)
         if: matrix.platform == 'windows-latest'
@@ -120,6 +122,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPIMAGE_EXTRACT_AND_RUN: 1
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.platform == 'windows-latest' && '-Clink-args=/FORCE:MULTIPLE' || '' }}
         with:
           args: --target ${{ matrix.target }}
 
