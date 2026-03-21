@@ -20,9 +20,6 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             bundles: dmg
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            bundles: dmg
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             bundles: deb rpm
@@ -82,10 +79,11 @@ jobs:
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install ffmpeg cmake llvm pkg-config
-          FFMPEG_PREFIX=$(brew --prefix ffmpeg)
+          brew install ffmpeg@7 cmake llvm pkg-config
+          FFMPEG_PREFIX=$(brew --prefix ffmpeg@7)
           SDKROOT=$(xcrun --show-sdk-path)
           echo "PKG_CONFIG_PATH=${FFMPEG_PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
+          echo "FFMPEG_DIR=${FFMPEG_PREFIX}" >> $GITHUB_ENV
           echo "SDKROOT=${SDKROOT}" >> $GITHUB_ENV
           echo "BINDGEN_EXTRA_CLANG_ARGS=-I${FFMPEG_PREFIX}/include -isysroot ${SDKROOT}" >> $GITHUB_ENV
 
