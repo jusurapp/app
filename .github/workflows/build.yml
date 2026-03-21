@@ -81,17 +81,36 @@ jobs:
           echo "FFMPEG_DIR=$(brew --prefix ffmpeg)" >> $GITHUB_ENV
 
       # Windows dependencies
-      - name: Install Windows dependencies
+      - name: Install FFmpeg (Windows)
         if: matrix.platform == 'windows-latest'
+        shell: pwsh
         run: |
-          choco install ffmpeg llvm cmake --yes
-          echo "LIBCLANG_PATH=C:\Program Files\LLVM\lib" >> $env:GITHUB_ENV
-          echo "FFMPEG_DIR=C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg" >> $env:GITHUB_ENV
+          $FFMPEG_VER = "7.1"
+          $url = "https://github.com/GyanD/codexffmpeg/releases/download/$FFMPEG_VER/ffmpeg-$FFMPEG_VER-full_build-shared.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath C:\ffmpeg-build
+          $ffdir = "C:\ffmpeg-build\ffmpeg-$FFMPEG_VER-full_build-shared"
+          echo "FFMPEG_DIR=$ffdir" >> $env:GITHUB_ENV
+          echo "$ffdir\bin" >> $env:GITHUB_PATH
+          echo "FFMPEG_PKG_CONFIG_PATH=$ffdir\lib\pkgconfig" >> $env:GITHUB_ENV
 
-      - name: Install Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          cache: true
+      - name: Install LLVM (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install llvm cmake --yes
+          echo "LIBCLANG_PATH=C:\Program Files\LLVM\lib" >> $env:GITHUB_ENV
+
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ver = "1.4.309.0"
+          $url = "https://sdk.lunarg.com/sdk/download/$ver/windows/VulkanSDK-$ver-Installer.exe"
+          Invoke-WebRequest -Uri $url -OutFile VulkanSDK.exe
+          Start-Process -FilePath .\VulkanSDK.exe -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait
+          echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
 
       - name: Install npm dependencies
         run: npm ci
@@ -100,6 +119,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPIMAGE_EXTRACT_AND_RUN: 1
         with:
           args: --target ${{ matrix.target }}
 
