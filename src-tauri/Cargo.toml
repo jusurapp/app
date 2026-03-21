@@ -1,0 +1,33 @@
+[package]
+name = "tauri-app"
+version = "0.1.0"
+description = "Jusur - Jusur Desktop App"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "tauri_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors"] }
+reqwest = { version = "0.12", features = ["stream", "json"] }
+futures-util = "0.3"
+zip = "2"
+tempfile = "3"
+dirs = "6"
+url = "2"
+transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", features = ["whisper-cpp"] }
+llama-cpp-2 = { version = "0.1", features = ["dynamic-link"] }
+encoding_rs = "0.8"
+ffmpeg-next = "7"
+urlencoding = "2"
