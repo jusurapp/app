@@ -34,13 +34,13 @@ fn run_llama_inference(prompt: &str) -> Result<String, String> {
 
     let mut state_guard = LLAMA_STATE.lock().unwrap();
     if state_guard.is_none() {
-        println!("[llama] Loading model: {}", model_path.display());
+        crate::log::log!("[llama] Loading model: {}", model_path.display());
         let backend = LlamaBackend::init()
             .map_err(|e| format!("Failed to init llama backend: {e}"))?;
         let model = LlamaModel::load_from_file(&backend, &model_path, &LlamaModelParams::default())
             .map_err(|e| format!("Failed to load LLM model: {e}"))?;
         *state_guard = Some(LlamaState { backend, model });
-        println!("[llama] Model loaded.");
+        crate::log::log!("[llama] Model loaded.");
     }
 
     let state = state_guard.as_ref().unwrap();
@@ -120,7 +120,7 @@ async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize
         numbered.join("\n")
     );
 
-    println!("[translate] Batch {}/{}: running inference ({} chars)...", batch_idx, total_batches, prompt.len());
+    crate::log::log!("[translate] Batch {}/{}: running inference ({} chars)...", batch_idx, total_batches, prompt.len());
     let start = std::time::Instant::now();
 
     let content = tokio::task::spawn_blocking(move || run_llama_inference(&prompt))
@@ -128,8 +128,8 @@ async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize
         .map_err(|e| format!("spawn_blocking failed: {e}"))??;
 
     let elapsed = start.elapsed();
-    println!("[translate] Batch {}/{}: done in {:.1}s", batch_idx, total_batches, elapsed.as_secs_f64());
-    println!("[translate] Batch {}/{}: raw response:\n{}", batch_idx, total_batches, content);
+    crate::log::log!("[translate] Batch {}/{}: done in {:.1}s", batch_idx, total_batches, elapsed.as_secs_f64());
+    crate::log::log!("[translate] Batch {}/{}: raw response:\n{}", batch_idx, total_batches, content);
 
     let mut translations: Vec<String> = Vec::new();
     for line in content.lines() {
@@ -143,7 +143,7 @@ async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize
         }
     }
 
-    println!("[translate] Batch {}/{}: parsed {} translations for {} lines", batch_idx, total_batches, translations.len(), lines.len());
+    crate::log::log!("[translate] Batch {}/{}: parsed {} translations for {} lines", batch_idx, total_batches, translations.len(), lines.len());
     Ok(translations)
 }
 
@@ -164,7 +164,7 @@ pub async fn translate_segments(segments: &[serde_json::Value]) -> Result<Vec<se
         .collect();
 
     let total_batches = (lines.len() + TRANSLATE_BATCH_SIZE - 1) / TRANSLATE_BATCH_SIZE;
-    println!("[translate] Starting translation: {} segments in {} batches of {}", segments.len(), total_batches, TRANSLATE_BATCH_SIZE);
+    crate::log::log!("[translate] Starting translation: {} segments in {} batches of {}", segments.len(), total_batches, TRANSLATE_BATCH_SIZE);
 
     let mut all_translations: Vec<String> = Vec::with_capacity(segments.len());
 
@@ -180,7 +180,7 @@ pub async fn translate_segments(segments: &[serde_json::Value]) -> Result<Vec<se
         }
     }
 
-    println!("[translate] All done: {} segments translated in {:.1}s", all_translations.len(), total_start.elapsed().as_secs_f64());
+    crate::log::log!("[translate] All done: {} segments translated in {:.1}s", all_translations.len(), total_start.elapsed().as_secs_f64());
 
     let enriched: Vec<serde_json::Value> = segments
         .iter()

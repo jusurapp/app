@@ -31,3 +31,4 @@ llama-cpp-2 = { version = "0.1", features = ["dynamic-link"] }
 encoding_rs = "0.8"
 ffmpeg-next = "7"
 urlencoding = "2"
+chrono = "0.4"

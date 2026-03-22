@@ -111,15 +111,19 @@ async fn fetch_metadata_ytdlp(url: &str, video_id: &str, site: &str) -> VideoMet
         .unwrap_or_default()
         .as_secs();
 
-    let output = tokio::process::Command::new(ytdlp_binary_path())
-        .args([
-            "--skip-download",
-            "--no-playlist",
-            "--print", "%(title)s\n%(uploader)s\n%(duration)s\n%(thumbnail)s",
-            url,
-        ])
-        .output()
-        .await;
+    let mut cmd = tokio::process::Command::new(ytdlp_binary_path());
+    cmd.args([
+        "--skip-download",
+        "--no-playlist",
+        "--print", "%(title)s\n%(uploader)s\n%(duration)s\n%(thumbnail)s",
+        url,
+    ]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let output = cmd.output().await;
 
     let (title, author_name, duration_secs, thumbnail_url) = match output {
         Ok(out) if out.status.success() => {
@@ -164,7 +168,7 @@ pub async fn transcribe(
     State(app): State<Arc<tauri::AppHandle>>,
     Json(payload): Json<TranscribeRequest>,
 ) -> Json<TranscribeResponse> {
-    println!("[Jusur] Transcribe request for: {}", payload.url);
+    crate::log::log!("[Jusur] Transcribe request for: {}", payload.url);
 
     let video_id = extract_video_id(&payload.url).unwrap_or_else(|| {
         std::time::SystemTime::now()
@@ -177,7 +181,7 @@ pub async fn transcribe(
     // Fast path: return cached result immediately without any network calls
     let cache_path = transcription_cache_dir().join(format!("{}.json", &video_id));
     if cache_path.exists() {
-        println!("[transcribe] Cache hit for video {} — returning immediately", video_id);
+        crate::log::log!("[transcribe] Cache hit for video {} — returning immediately", video_id);
         if let Ok(cached) = std::fs::read_to_string(&cache_path) {
             if let Ok(segments) = serde_json::from_str::<Vec<serde_json::Value>>(&cached) {
                 return Json(TranscribeResponse { segments });
@@ -204,7 +208,7 @@ pub async fn transcribe(
             Json(TranscribeResponse { segments })
         }
         Err(e) => {
-            eprintln!("[Jusur] Transcribe error: {}", e);
+            crate::log::log!("[Jusur] Transcribe error: {}", e);
             Json(TranscribeResponse { segments: vec![] })
         }
     }
@@ -214,7 +218,7 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
     // Check cache first
     let cache_path = transcription_cache_dir().join(format!("{}.json", video_id));
     if cache_path.exists() {
-        println!("[transcribe] Cache hit for video {}", video_id);
+        crate::log::log!("[transcribe] Cache hit for video {}", video_id);
         app.emit("translation-status", TranslationStatus {
             video_id: video_id.to_string(),
             message: "Loading from cache...".into(),
@@ -228,7 +232,7 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
 
     let tmp_dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let tmp_path = tmp_dir.path();
-    println!("[transcribe] tmp dir: {}", tmp_path.display());
+    crate::log::log!("[transcribe] tmp dir: {}", tmp_path.display());
 
     // 1. Download audio with yt-dlp
     app.emit("translation-status", TranslationStatus {
@@ -236,16 +240,22 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
         message: "Downloading audio...".into(),
     }).ok();
     let output_template = format!("{}/audio.%(ext)s", tmp_path.display());
-    println!("[transcribe] Running yt-dlp for: {}", url);
-    let ytdlp = tokio::process::Command::new(ytdlp_binary_path())
-        .args(["-x", "--no-playlist", "-o", &output_template, url])
+    crate::log::log!("[transcribe] Running yt-dlp for: {}", url);
+    let mut ytdlp_cmd = tokio::process::Command::new(ytdlp_binary_path());
+    ytdlp_cmd.args(["-x", "--no-playlist", "-o", &output_template, url]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        ytdlp_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let ytdlp = ytdlp_cmd
         .output()
         .await
         .map_err(|e| format!("yt-dlp failed to start: {}", e))?;
 
-    println!("[transcribe] yt-dlp exit code: {}", ytdlp.status);
+    crate::log::log!("[transcribe] yt-dlp exit code: {}", ytdlp.status);
     if !ytdlp.status.success() {
-        println!("[transcribe] yt-dlp stderr: {}", String::from_utf8_lossy(&ytdlp.stderr));
+        crate::log::log!("[transcribe] yt-dlp stderr: {}", String::from_utf8_lossy(&ytdlp.stderr));
         return Err(format!("yt-dlp failed: {}", String::from_utf8_lossy(&ytdlp.stderr)));
     }
 
@@ -255,7 +265,7 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
         .map(|e| e.path())
         .find(|p| p.file_name().map_or(false, |n| n.to_string_lossy().starts_with("audio.")))
         .ok_or("yt-dlp did not produce an audio file")?;
-    println!("[transcribe] Downloaded: {}", downloaded_audio.display());
+    crate::log::log!("[transcribe] Downloaded: {}", downloaded_audio.display());
 
     // Convert to 16kHz mono WAV
     app.emit("translation-status", TranslationStatus {
@@ -265,7 +275,7 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
     let audio16_path = tmp_path.join("audio_16k.wav");
     crate::audio::convert_to_wav_16k(&downloaded_audio, &audio16_path)
         .map_err(|e| format!("Audio conversion failed: {}", e))?;
-    println!("[transcribe] Converted to 16kHz WAV: {} bytes", std::fs::metadata(&audio16_path).map(|m| m.len()).unwrap_or(0));
+    crate::log::log!("[transcribe] Converted to 16kHz WAV: {} bytes", std::fs::metadata(&audio16_path).map(|m| m.len()).unwrap_or(0));
 
     // 2. Transcribe with whisper.cpp via transcribe-rs
     app.emit("translation-status", TranslationStatus {
@@ -273,7 +283,7 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
         message: "Transcribing audio...".into(),
     }).ok();
     let model_path = whisper_model_path();
-    println!("[transcribe] Loading WhisperEngine with model: {}", model_path.display());
+    crate::log::log!("[transcribe] Loading WhisperEngine with model: {}", model_path.display());
 
     let samples = transcribe_rs::audio::read_wav_samples(&audio16_path)
         .map_err(|e| format!("Failed to read WAV samples: {}", e))?;
@@ -289,14 +299,14 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
     let result = engine.transcribe_with(&samples, &params)
         .map_err(|e| format!("Whisper transcription failed: {}", e))?;
 
-    println!("[transcribe] Got {} segments.", result.segments.as_ref().map_or(0, |s| s.len()));
+    crate::log::log!("[transcribe] Got {} segments.", result.segments.as_ref().map_or(0, |s| s.len()));
 
     // 3. Convert TranscriptionSegments to JSON
     let raw_segments: Vec<serde_json::Value> = result.segments
         .unwrap_or_default()
         .into_iter()
         .map(|seg| {
-            println!("[transcribe]   [{}→{}] {}", seg.start, seg.end, seg.text.trim());
+            crate::log::log!("[transcribe]   [{}→{}] {}", seg.start, seg.end, seg.text.trim());
             serde_json::json!({
                 "timestamps": {
                     "from": secs_to_srt(seg.start),
@@ -307,12 +317,12 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
         })
         .collect();
 
-    println!("[transcribe] Got {} segments. Arabic text:", raw_segments.len());
+    crate::log::log!("[transcribe] Got {} segments. Arabic text:", raw_segments.len());
     for (i, seg) in raw_segments.iter().enumerate() {
         let text = seg.get("text").and_then(|t| t.as_str()).unwrap_or("");
         let from = seg.get("timestamps").and_then(|t| t.get("from")).and_then(|t| t.as_str()).unwrap_or("?");
         let to = seg.get("timestamps").and_then(|t| t.get("to")).and_then(|t| t.as_str()).unwrap_or("?");
-        println!("[transcribe]   {}: [{}→{}] {}", i + 1, from, to, text);
+        crate::log::log!("[transcribe]   {}: [{}→{}] {}", i + 1, from, to, text);
     }
 
     // 4. Translate Arabic → English via llama.cpp
@@ -328,7 +338,7 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
     let new_cache_path = cache_dir.join(format!("{}.json", video_id));
     if let Ok(json) = serde_json::to_string(&segments) {
         let _ = std::fs::write(&new_cache_path, json);
-        println!("[transcribe] Cached result for video {}", video_id);
+        crate::log::log!("[transcribe] Cached result for video {}", video_id);
     }
 
     Ok(segments)
@@ -358,7 +368,13 @@ pub fn open_url(url: String) {
     let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
 
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd").args(["/c", "start", "", &url]).spawn();
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", "", &url])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn();
+    }
 }
 
 #[tauri::command]
@@ -382,7 +398,7 @@ pub fn redo_translation(app: tauri::AppHandle, video_id: String) {
         {
             Some(u) => u,
             None => {
-                eprintln!("[redo] Could not read meta for {}", video_id);
+                crate::log::log!("[redo] Could not read meta for {}", video_id);
                 return;
             }
         };
@@ -400,7 +416,7 @@ pub fn redo_translation(app: tauri::AppHandle, video_id: String) {
                 }
                 app.emit("translation-completed", metadata).ok();
             }
-            Err(e) => eprintln!("[redo] Failed: {}", e),
+            Err(e) => crate::log::log!("[redo] Failed: {}", e),
         }
     });
 }

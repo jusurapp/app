@@ -39,7 +39,7 @@ async fn download_ytdlp_binary(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
     let url = ytdlp_download_url();
-    println!("[yt-dlp] Downloading from: {}", url);
+    crate::log::log!("[yt-dlp] Downloading from: {}", url);
 
     app.emit("ytdlp-progress", ProgressPayload {
         status: "downloading".into(),
@@ -102,13 +102,18 @@ async fn download_ytdlp_binary(app: &tauri::AppHandle) -> Result<(), String> {
     }
 
     // Save installed version
-    let version_output = std::process::Command::new(&binary_path)
-        .arg("--version")
-        .output();
+    let mut version_cmd = std::process::Command::new(&binary_path);
+    version_cmd.arg("--version");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        version_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let version_output = version_cmd.output();
     if let Ok(out) = version_output {
         let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let _ = std::fs::write(ytdlp_version_path(), &version);
-        println!("[yt-dlp] Installed version: {}", version);
+        crate::log::log!("[yt-dlp] Installed version: {}", version);
     }
 
     Ok(())
@@ -152,19 +157,19 @@ pub async fn update_ytdlp(app: tauri::AppHandle) -> Result<(), String> {
     let current_version = std::fs::read_to_string(ytdlp_version_path()).unwrap_or_default();
 
     if latest_version.is_empty() {
-        println!("[yt-dlp] Could not determine latest version, skipping update");
+        crate::log::log!("[yt-dlp] Could not determine latest version, skipping update");
         return Ok(());
     }
 
     if latest_version != current_version.trim() {
-        println!(
+        crate::log::log!(
             "[yt-dlp] Updating from {} to {}",
             current_version.trim(),
             latest_version
         );
         download_ytdlp_binary(&app).await?;
     } else {
-        println!("[yt-dlp] Already up to date: {}", current_version.trim());
+        crate::log::log!("[yt-dlp] Already up to date: {}", current_version.trim());
     }
 
     Ok(())

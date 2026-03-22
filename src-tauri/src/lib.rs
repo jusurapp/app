@@ -1,5 +1,6 @@
 mod audio;
 mod llama;
+mod log;
 mod transcribe;
 mod whisper;
 mod ytdlp;
@@ -38,7 +39,7 @@ async fn run_http_server(app: tauri::AppHandle) {
         .await
         .expect("Failed to bind to port 8765");
 
-    println!("[Jusur] HTTP server listening on 127.0.0.1:8765");
+    log::log!("[Jusur] HTTP server listening on 127.0.0.1:8765");
 
     axum::serve(listener, router)
         .await
