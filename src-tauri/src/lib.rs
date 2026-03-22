@@ -69,7 +69,7 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
             TrayIconBuilder::new()
-                .icon(tauri::image::Image::from_path("icons/tray.png")?)
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?)
                 .menu(&menu)
                 .tooltip("Jusur")
                 .on_menu_event(|app, event| match event.id.as_ref() {
