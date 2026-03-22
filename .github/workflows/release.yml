@@ -140,6 +140,10 @@ jobs:
           find src-tauri/target/x86_64-pc-windows-msvc/release/build/llama-cpp-sys-2-*/out -name "*.dll" -exec cp {} src-tauri/libs/ \;
           # FFmpeg shared libraries
           cp "${FFMPEG_DIR}/bin/"*.dll src-tauri/libs/
+          # Visual C++ runtime
+          cp /c/Windows/System32/msvcp140.dll src-tauri/libs/
+          cp /c/Windows/System32/vcruntime140.dll src-tauri/libs/
+          cp /c/Windows/System32/vcruntime140_1.dll src-tauri/libs/
           echo "Bundled DLLs:"
           ls -la src-tauri/libs/
           # Create Tauri config override to include DLLs as resources
@@ -157,6 +161,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Jusur ${{ github.ref_name }}"
           releaseBody: "See the assets below to download and install Jusur."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}${{ matrix.platform == 'windows-latest' && ' --config src-tauri/tauri.dll-bundle.conf.json' || '' }}
