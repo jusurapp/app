@@ -23,7 +23,7 @@ jobs:
             bundles: deb rpm
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            bundles: nsis msi
+            bundles: nsis
 
     runs-on: ${{ matrix.platform }}
 
@@ -123,6 +123,28 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      # Windows: pre-build to locate DLLs, then copy them for NSIS bundling
+      - name: Pre-build Rust (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -Clink-args=/FORCE:MULTIPLE
+        run: cd src-tauri && cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Bundle native DLLs (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p src-tauri/libs
+          # llama.cpp shared libraries
+          find src-tauri/target/x86_64-pc-windows-msvc/release/build/llama-cpp-sys-2-*/out -name "*.dll" -exec cp {} src-tauri/libs/ \;
+          # FFmpeg shared libraries
+          cp "${FFMPEG_DIR}/bin/"*.dll src-tauri/libs/
+          echo "Bundled DLLs:"
+          ls -la src-tauri/libs/
+          # Create Tauri config override to include DLLs as resources
+          echo '{"bundle":{"resources":{"libs/*":"."}}}' > src-tauri/tauri.dll-bundle.conf.json
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -137,4 +159,4 @@ jobs:
           releaseBody: "See the assets below to download and install Jusur."
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}${{ matrix.platform == 'windows-latest' && ' --config src-tauri/tauri.dll-bundle.conf.json' || '' }}
