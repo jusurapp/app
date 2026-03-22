@@ -242,7 +242,7 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
     let output_template = format!("{}/audio.%(ext)s", tmp_path.display());
     crate::log::log!("[transcribe] Running yt-dlp for: {}", url);
     let mut ytdlp_cmd = tokio::process::Command::new(ytdlp_binary_path());
-    ytdlp_cmd.args(["-x", "--no-playlist", "-o", &output_template, url]);
+    ytdlp_cmd.args(["-f", "bestaudio/best", "--no-playlist", "-o", &output_template, url]);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
