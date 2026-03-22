@@ -144,6 +144,8 @@ jobs:
           cp /c/Windows/System32/msvcp140.dll src-tauri/libs/
           cp /c/Windows/System32/vcruntime140.dll src-tauri/libs/
           cp /c/Windows/System32/vcruntime140_1.dll src-tauri/libs/
+          # OpenMP runtime (used by llama.cpp)
+          cp /c/Windows/System32/vcomp140.dll src-tauri/libs/
           echo "Bundled DLLs:"
           ls -la src-tauri/libs/
           # Create Tauri config override to include DLLs as resources
