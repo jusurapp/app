@@ -351,7 +351,14 @@ pub fn get_history() -> Vec<VideoMetadata> {
 
 #[tauri::command]
 pub fn open_url(url: String) {
+    #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(&url).spawn();
+
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd").args(["/c", "start", "", &url]).spawn();
 }
 
 #[tauri::command]

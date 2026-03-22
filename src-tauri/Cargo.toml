@@ -1,12 +1,12 @@
 [package]
-name = "tauri-app"
+name = "jusur"
 version = "0.1.0"
 description = "Jusur - Jusur Desktop App"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "tauri_app_lib"
+name = "jusur_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
