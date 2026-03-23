@@ -283,21 +283,37 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
         message: "Transcribing audio...".into(),
     }).ok();
     let model_path = whisper_model_path();
-    crate::log::log!("[transcribe] Loading WhisperEngine with model: {}", model_path.display());
+    let model_size = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+    crate::log::log!("[transcribe] Loading WhisperEngine with model: {} ({} bytes)", model_path.display(), model_size);
 
+    // large-v3-turbo.bin should be ~1.6GB; if much smaller, the download was likely incomplete
+    if model_size < 1_000_000_000 {
+        let _ = std::fs::remove_file(&model_path);
+        return Err(format!(
+            "Whisper model file is too small ({} bytes), likely corrupted. It has been deleted — please restart to re-download.",
+            model_size
+        ));
+    }
+
+    crate::log::log!("[transcribe] Reading WAV samples...");
     let samples = transcribe_rs::audio::read_wav_samples(&audio16_path)
         .map_err(|e| format!("Failed to read WAV samples: {}", e))?;
+    crate::log::log!("[transcribe] Read {} samples", samples.len());
 
+    crate::log::log!("[transcribe] Calling WhisperEngine::load...");
     let mut engine = WhisperEngine::load(&model_path)
         .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+    crate::log::log!("[transcribe] WhisperEngine loaded successfully");
 
     let params = WhisperInferenceParams {
         language: Some("ar".to_string()),
         ..Default::default()
     };
 
+    crate::log::log!("[transcribe] Starting transcription...");
     let result = engine.transcribe_with(&samples, &params)
         .map_err(|e| format!("Whisper transcription failed: {}", e))?;
+    crate::log::log!("[transcribe] Transcription complete");
 
     crate::log::log!("[transcribe] Got {} segments.", result.segments.as_ref().map_or(0, |s| s.len()));
 
