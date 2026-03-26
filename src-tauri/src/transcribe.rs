@@ -301,19 +301,24 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
     crate::log::log!("[transcribe] Read {} samples", samples.len());
 
     crate::log::log!("[transcribe] Calling WhisperEngine::load...");
-    let mut engine = WhisperEngine::load(&model_path)
-        .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
-    crate::log::log!("[transcribe] WhisperEngine loaded successfully");
+    let result = tokio::task::spawn_blocking(move || {
+        let mut engine = WhisperEngine::load(&model_path)
+            .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+        crate::log::log!("[transcribe] WhisperEngine loaded successfully");
 
-    let params = WhisperInferenceParams {
-        language: Some("ar".to_string()),
-        ..Default::default()
-    };
+        let params = WhisperInferenceParams {
+            language: Some("ar".to_string()),
+            ..Default::default()
+        };
 
-    crate::log::log!("[transcribe] Starting transcription...");
-    let result = engine.transcribe_with(&samples, &params)
-        .map_err(|e| format!("Whisper transcription failed: {}", e))?;
-    crate::log::log!("[transcribe] Transcription complete");
+        crate::log::log!("[transcribe] Starting transcription...");
+        let result = engine.transcribe_with(&samples, &params)
+            .map_err(|e| format!("Whisper transcription failed: {}", e))?;
+        crate::log::log!("[transcribe] Transcription complete");
+        Ok::<_, String>(result)
+    })
+    .await
+    .map_err(|e| format!("Whisper thread panicked: {}", e))??;
 
     crate::log::log!("[transcribe] Got {} segments.", result.segments.as_ref().map_or(0, |s| s.len()));
 
