@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Emitter;
-use transcribe_rs::whisper_cpp::{WhisperEngine, WhisperInferenceParams};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::llama::translate_segments;
 use crate::whisper::{secs_to_srt, whisper_model_path};
@@ -296,44 +296,65 @@ async fn transcribe_inner(app: &tauri::AppHandle, url: &str, video_id: &str) -> 
     }
 
     crate::log::log!("[transcribe] Reading WAV samples...");
-    let samples = transcribe_rs::audio::read_wav_samples(&audio16_path)
-        .map_err(|e| format!("Failed to read WAV samples: {}", e))?;
+    let samples = {
+        let mut reader = hound::WavReader::open(&audio16_path)
+            .map_err(|e| format!("Failed to open WAV: {}", e))?;
+        reader.samples::<i16>()
+            .map(|s| s.map(|v| v as f32 / 32768.0))
+            .collect::<Result<Vec<f32>, _>>()
+            .map_err(|e| format!("Failed to read WAV samples: {}", e))?
+    };
     crate::log::log!("[transcribe] Read {} samples", samples.len());
 
-    crate::log::log!("[transcribe] Calling WhisperEngine::load...");
-    let result = tokio::task::spawn_blocking(move || {
-        let mut engine = WhisperEngine::load(&model_path)
-            .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
-        crate::log::log!("[transcribe] WhisperEngine loaded successfully");
+    crate::log::log!("[transcribe] Calling WhisperContext::new...");
+    let segments = tokio::task::spawn_blocking(move || {
+        let ctx = WhisperContext::new_with_params(
+            &model_path,
+            WhisperContextParameters::default(),
+        ).map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+        crate::log::log!("[transcribe] WhisperContext loaded successfully");
 
-        let params = WhisperInferenceParams {
-            language: Some("ar".to_string()),
-            ..Default::default()
-        };
+        let mut state = ctx.create_state()
+            .map_err(|e| format!("Failed to create Whisper state: {}", e))?;
+
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 0 });
+        params.set_language(Some("ar"));
 
         crate::log::log!("[transcribe] Starting transcription...");
-        let result = engine.transcribe_with(&samples, &params)
+        state.full(params, &samples)
             .map_err(|e| format!("Whisper transcription failed: {}", e))?;
         crate::log::log!("[transcribe] Transcription complete");
-        Ok::<_, String>(result)
+
+        let n = state.full_n_segments();
+        let mut segs = Vec::with_capacity(n as usize);
+        for i in 0..n {
+            let seg = state.get_segment(i)
+                .ok_or_else(|| format!("Segment {} out of bounds", i))?;
+            let text = seg.to_str_lossy()
+                .map_err(|e| format!("Failed to get segment text: {}", e))?
+                .to_string();
+            let t0 = seg.start_timestamp();
+            let t1 = seg.end_timestamp();
+            segs.push((t0, t1, text));
+        }
+        Ok::<_, String>(segs)
     })
     .await
     .map_err(|e| format!("Whisper thread panicked: {}", e))??;
 
-    crate::log::log!("[transcribe] Got {} segments.", result.segments.as_ref().map_or(0, |s| s.len()));
-
-    // 3. Convert TranscriptionSegments to JSON
-    let raw_segments: Vec<serde_json::Value> = result.segments
-        .unwrap_or_default()
+    // 3. Convert segments to JSON (t0/t1 are in centiseconds)
+    let raw_segments: Vec<serde_json::Value> = segments
         .into_iter()
-        .map(|seg| {
-            crate::log::log!("[transcribe]   [{}→{}] {}", seg.start, seg.end, seg.text.trim());
+        .map(|(t0, t1, text)| {
+            let start = t0 as f32 / 100.0;
+            let end = t1 as f32 / 100.0;
+            crate::log::log!("[transcribe]   [{}→{}] {}", start, end, text.trim());
             serde_json::json!({
                 "timestamps": {
-                    "from": secs_to_srt(seg.start),
-                    "to":   secs_to_srt(seg.end),
+                    "from": secs_to_srt(start),
+                    "to":   secs_to_srt(end),
                 },
-                "text": seg.text.trim(),
+                "text": text.trim(),
             })
         })
         .collect();
@@ -441,3 +462,4 @@ pub fn redo_translation(app: tauri::AppHandle, video_id: String) {
         }
     });
 }
+
