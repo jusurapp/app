@@ -130,6 +130,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-latest' && '11.0' || '' }}
           CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-latest' && '11.0' || '' }}
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.platform == 'windows-latest' && '-Clink-args=/FORCE:MULTIPLE' || '' }}
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.platform == 'ubuntu-22.04' && '-Clink-args=-Wl,--allow-multiple-definition' || '' }}
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
