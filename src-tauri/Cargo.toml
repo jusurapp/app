@@ -28,7 +28,7 @@ dirs = "6"
 url = "2"
 whisper-rs = "0.16"
 hound = "3"
-llama-cpp-2 = { version = "0.1", features = ["dynamic-link"] }
+llama-cpp-2 = { version = "0.1" }
 encoding_rs = "0.8"
 ffmpeg-next = "7"
 urlencoding = "2"
