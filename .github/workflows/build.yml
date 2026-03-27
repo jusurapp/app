@@ -44,6 +44,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          key: v2
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -112,15 +113,21 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath C:\ffmpeg-build
           $ffdir = (Get-ChildItem C:\ffmpeg-build -Directory | Select-Object -First 1).FullName
-          echo "FFMPEG_DIR=$ffdir" >> $env:GITHUB_ENV
-          echo "$ffdir\bin" >> $env:GITHUB_PATH
-          # Fix BtbN pkgconfig files: they have Linux-style prefix from cross-compilation
+          # Use forward slashes for cross-tool compatibility (clang/bindgen path handling)
           $prefix = $ffdir -replace '\\', '/'
+          echo "FFMPEG_DIR=$prefix" >> $env:GITHUB_ENV
+          echo "$ffdir\bin" >> $env:GITHUB_PATH
+          # Fix BtbN pkgconfig files: they have Linux-style paths from cross-compilation
           Get-ChildItem "$ffdir\lib\pkgconfig\*.pc" | ForEach-Object {
-            (Get-Content $_.FullName -Raw) -replace '(?m)^prefix=.*$', "prefix=$prefix" |
-            Set-Content $_.FullName
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace '(?m)^prefix=.*$', "prefix=$prefix"
+            $content = $content -replace '(?m)^includedir=.*$', "includedir=$prefix/include"
+            $content = $content -replace '(?m)^libdir=.*$', "libdir=$prefix/lib"
+            $content | Set-Content $_.FullName
           }
           echo "PKG_CONFIG_LIBDIR=$prefix/lib/pkgconfig" >> $env:GITHUB_ENV
+          # Explicitly pass FFmpeg include path to bindgen/clang for ARM64 target
+          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64-pc-windows-msvc=-I$prefix/include" >> $env:GITHUB_ENV
 
       - name: Install LLVM (Windows x64)
         if: matrix.target == 'x86_64-pc-windows-msvc'
@@ -149,13 +156,6 @@ jobs:
           Start-Process -FilePath .\VulkanSDK.exe -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait
           echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
-
-      - name: Configure ARM64 Windows build tools
-        if: matrix.target == 'aarch64-pc-windows-msvc'
-        shell: pwsh
-        run: |
-          # ggml requires clang for ARM; use ClangCL toolset with x64 host tools
-          echo "CMAKE_GENERATOR_TOOLSET=ClangCL,host=x64" >> $env:GITHUB_ENV
 
       - name: Install npm dependencies
         run: npm ci
