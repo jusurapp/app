@@ -114,6 +114,13 @@ jobs:
           $ffdir = (Get-ChildItem C:\ffmpeg-build -Directory | Select-Object -First 1).FullName
           echo "FFMPEG_DIR=$ffdir" >> $env:GITHUB_ENV
           echo "$ffdir\bin" >> $env:GITHUB_PATH
+          # Fix BtbN pkgconfig files: they have Linux-style prefix from cross-compilation
+          $prefix = $ffdir -replace '\\', '/'
+          Get-ChildItem "$ffdir\lib\pkgconfig\*.pc" | ForEach-Object {
+            (Get-Content $_.FullName -Raw) -replace '(?m)^prefix=.*$', "prefix=$prefix" |
+            Set-Content $_.FullName
+          }
+          echo "PKG_CONFIG_LIBDIR=$prefix/lib/pkgconfig" >> $env:GITHUB_ENV
 
       - name: Install LLVM (Windows x64)
         if: matrix.target == 'x86_64-pc-windows-msvc'
@@ -142,6 +149,13 @@ jobs:
           Start-Process -FilePath .\VulkanSDK.exe -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait
           echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
+
+      - name: Configure ARM64 Windows build tools
+        if: matrix.target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          # ggml requires clang for ARM; use ClangCL toolset with x64 host tools
+          echo "CMAKE_GENERATOR_TOOLSET=ClangCL,host=x64" >> $env:GITHUB_ENV
 
       - name: Install npm dependencies
         run: npm ci
