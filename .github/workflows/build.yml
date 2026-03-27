@@ -26,9 +26,6 @@ jobs:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             bundles: nsis
-          - platform: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            bundles: nsis
 
     runs-on: ${{ matrix.platform }}
 
@@ -105,29 +102,6 @@ jobs:
           echo "FFMPEG_DIR=$ffdir" >> $env:GITHUB_ENV
           echo "$ffdir\bin" >> $env:GITHUB_PATH
 
-      - name: Install FFmpeg (Windows ARM64)
-        if: matrix.target == 'aarch64-pc-windows-msvc'
-        shell: pwsh
-        run: |
-          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-winarm64-gpl-shared.zip"
-          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
-          Expand-Archive ffmpeg.zip -DestinationPath C:\ffmpeg-build
-          $ffdir = (Get-ChildItem C:\ffmpeg-build -Directory | Select-Object -First 1).FullName
-          # Use forward slashes for cross-tool compatibility (clang/bindgen path handling)
-          $prefix = $ffdir -replace '\\', '/'
-          echo "FFMPEG_DIR=$prefix" >> $env:GITHUB_ENV
-          echo "$ffdir\bin" >> $env:GITHUB_PATH
-          # Fix BtbN pkgconfig files: they have Linux-style paths from cross-compilation
-          Get-ChildItem "$ffdir\lib\pkgconfig\*.pc" | ForEach-Object {
-            $content = Get-Content $_.FullName -Raw
-            $content = $content -replace '(?m)^prefix=.*$', "prefix=$prefix"
-            $content = $content -replace '(?m)^includedir=.*$', "includedir=$prefix/include"
-            $content = $content -replace '(?m)^libdir=.*$', "libdir=$prefix/lib"
-            $content | Set-Content $_.FullName
-          }
-          echo "PKG_CONFIG_LIBDIR=$prefix/lib/pkgconfig" >> $env:GITHUB_ENV
-          # Explicitly pass FFmpeg include path to bindgen/clang for ARM64 target
-          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64-pc-windows-msvc=-I$prefix/include" >> $env:GITHUB_ENV
 
       - name: Install LLVM (Windows x64)
         if: matrix.target == 'x86_64-pc-windows-msvc'
@@ -136,15 +110,6 @@ jobs:
           choco install llvm --yes
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\lib" >> $env:GITHUB_ENV
 
-      - name: Install LLVM (Windows ARM64)
-        if: matrix.target == 'aarch64-pc-windows-msvc'
-        shell: pwsh
-        run: |
-          $ver = "19.1.7"
-          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$ver/LLVM-$ver-woa64.exe"
-          Invoke-WebRequest -Uri $url -OutFile LLVM-arm64.exe
-          Start-Process -FilePath .\LLVM-arm64.exe -ArgumentList "/S" -Wait
-          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
 
       - name: Install Vulkan SDK (Windows)
         if: runner.os == 'Windows'
@@ -168,7 +133,6 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-latest' && '11.0' || '' }}
           CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-latest' && '11.0' || '' }}
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-Clink-args=/FORCE:MULTIPLE' || '' }}
-          CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.target == 'aarch64-pc-windows-msvc' && '-Clink-args=/FORCE:MULTIPLE' || '' }}
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.platform == 'ubuntu-22.04' && '-Clink-args=-Wl,--allow-multiple-definition' || '' }}
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
