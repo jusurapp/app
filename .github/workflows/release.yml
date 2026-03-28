@@ -80,7 +80,7 @@ jobs:
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install ffmpeg@7 cmake pkg-config
+          brew install ffmpeg@7 cmake pkg-config dylibbundler
           FFMPEG_PREFIX=$(brew --prefix ffmpeg@7)
           SDKROOT=$(xcrun --show-sdk-path)
           echo "PKG_CONFIG_PATH=${FFMPEG_PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
@@ -164,9 +164,50 @@ jobs:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-Clink-args=/FORCE:MULTIPLE' || '' }}
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.platform == 'ubuntu-22.04' && '-Clink-args=-Wl,--allow-multiple-definition' || '' }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Jusur ${{ github.ref_name }}"
+          # macOS: post-processing step creates and uploads the DMG manually
+          tagName: ${{ runner.os != 'macOS' && github.ref_name || '' }}
+          releaseName: ${{ runner.os != 'macOS' && format('Jusur {0}', github.ref_name) || '' }}
           releaseBody: "See the assets below to download and install Jusur."
           releaseDraft: false
           prerelease: false
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}${{ matrix.platform == 'windows-latest' && ' --config src-tauri/tauri.dll-bundle.conf.json' || '' }}
+          args: --target ${{ matrix.target }} --bundles ${{ runner.os == 'macOS' && 'app' || matrix.bundles }}${{ matrix.platform == 'windows-latest' && ' --config src-tauri/tauri.dll-bundle.conf.json' || '' }}
+
+      - name: Bundle dylibs and create DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Jusur.app"
+          FRAMEWORKS="$APP/Contents/Frameworks"
+          BIN="$APP/Contents/MacOS/jusur"
+          VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          DMG="src-tauri/target/${{ matrix.target }}/release/bundle/dmg/Jusur_${VERSION}_aarch64.dmg"
+
+          mkdir -p "$FRAMEWORKS" "$(dirname "$DMG")"
+
+          # Recursively bundle all non-system Homebrew dylibs
+          dylibbundler -od -b \
+            -x "$BIN" \
+            -d "$FRAMEWORKS" \
+            -p "@executable_path/../Frameworks/"
+
+          # Re-sign everything (binary was invalidated by dylibbundler's install_name_tool changes)
+          codesign --force --deep --sign - "$APP"
+
+          # Create DMG
+          mkdir -p /tmp/dmg_staging
+          cp -r "$APP" /tmp/dmg_staging/
+          ln -sf /Applications /tmp/dmg_staging/Applications
+          hdiutil create -volname "Jusur" -srcfolder /tmp/dmg_staging -ov -format UDZO "$DMG"
+          rm -rf /tmp/dmg_staging
+
+      - name: Upload macOS DMG to release
+        if: runner.os == 'macOS'
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          DMG="src-tauri/target/${{ matrix.target }}/release/bundle/dmg/Jusur_${VERSION}_aarch64.dmg"
+          gh release create "${{ github.ref_name }}" \
+            --title "Jusur ${{ github.ref_name }}" \
+            --notes "See the assets below to download and install Jusur." \
+            || true
+          gh release upload "${{ github.ref_name }}" "$DMG" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

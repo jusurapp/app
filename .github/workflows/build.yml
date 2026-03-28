@@ -80,7 +80,7 @@ jobs:
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install ffmpeg@7 cmake pkg-config
+          brew install ffmpeg@7 cmake pkg-config dylibbundler
           FFMPEG_PREFIX=$(brew --prefix ffmpeg@7)
           SDKROOT=$(xcrun --show-sdk-path)
           echo "PKG_CONFIG_PATH=${FFMPEG_PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
@@ -132,10 +132,37 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: 1
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-latest' && '11.0' || '' }}
           CMAKE_OSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-latest' && '11.0' || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-Clink-args=/FORCE:MULTIPLE' || '' }}
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.platform == 'ubuntu-22.04' && '-Clink-args=-Wl,--allow-multiple-definition' || '' }}
         with:
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          args: --target ${{ matrix.target }} --bundles ${{ runner.os == 'macOS' && 'app' || matrix.bundles }}
+
+      - name: Bundle dylibs and create DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Jusur.app"
+          FRAMEWORKS="$APP/Contents/Frameworks"
+          BIN="$APP/Contents/MacOS/jusur"
+          VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          mkdir -p "$FRAMEWORKS" "src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+
+          dylibbundler -od -b \
+            -x "$BIN" \
+            -d "$FRAMEWORKS" \
+            -p "@executable_path/../Frameworks/"
+
+          codesign --force --deep --sign - "$APP"
+
+          mkdir -p /tmp/dmg_staging
+          cp -r "$APP" /tmp/dmg_staging/
+          ln -sf /Applications /tmp/dmg_staging/Applications
+          hdiutil create \
+            -volname "Jusur" \
+            -srcfolder /tmp/dmg_staging \
+            -ov -format UDZO \
+            "src-tauri/target/${{ matrix.target }}/release/bundle/dmg/Jusur_${VERSION}_aarch64.dmg"
+          rm -rf /tmp/dmg_staging
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
