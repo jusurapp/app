@@ -1,0 +1,73 @@
+--- a/build.rs	2006-07-24 09:21:28
++++ b/build.rs	2026-03-29 12:41:42
+@@ -1020,13 +1020,7 @@
+             let crt_static = env::var("CARGO_CFG_TARGET_FEATURE")
+                 .unwrap_or_default()
+                 .contains("crt-static");
+-            if cfg!(debug_assertions) {
+-                if crt_static {
+-                    println!("cargo:rustc-link-lib=libcmtd");
+-                } else {
+-                    println!("cargo:rustc-link-lib=dylib=msvcrtd");
+-                }
+-            }
++
+         }
+         TargetOs::Linux => {
+             println!("cargo:rustc-link-lib=dylib=stdc++");
+--- a/llama.cpp/ggml/src/gguf.cpp	2026-03-29 22:20:44
++++ b/llama.cpp/ggml/src/gguf.cpp	2026-03-29 22:20:44
+@@ -319,6 +319,22 @@
+
+     // remaining bytes in the file
+     uint64_t nbytes_remain() const {
++#ifdef _WIN32
++        const int64_t cur = _ftelli64(file);
++        if (cur < 0) {
++            return 0;
++        }
++        if (_fseeki64(file, 0, SEEK_END) != 0) {
++            _fseeki64(file, cur, SEEK_SET);
++            return 0;
++        }
++        const int64_t end = _ftelli64(file);
++        if (end < 0) {
++            _fseeki64(file, cur, SEEK_SET);
++            return 0;
++        }
++        _fseeki64(file, cur, SEEK_SET);
++#else
+         const long cur = ftell(file);
+         if (cur < 0) {
+             return 0;
+@@ -335,6 +351,7 @@
+             return 0;
+         }
+         fseek(file, cur, SEEK_SET);
++#endif
+         return static_cast<uint64_t>(end - cur);
+     }
+ };
+@@ -671,14 +688,22 @@
+     GGML_ASSERT(int64_t(ctx->info.size()) == n_tensors);
+
+     // we require the data section to be aligned, so take into account any padding
++#ifdef _WIN32
++    if (_fseeki64(file, GGML_PAD(_ftelli64(file), ctx->alignment), SEEK_SET) != 0) {
++#else
+     if (fseek(file, GGML_PAD(ftell(file), ctx->alignment), SEEK_SET) != 0) {
++#endif
+         GGML_LOG_ERROR("%s: failed to seek to beginning of data section\n", __func__);
+         gguf_free(ctx);
+         return nullptr;
+     }
+
+     // store the current file offset - this is where the data section starts
++#ifdef _WIN32
++    ctx->offset = _ftelli64(file);
++#else
+     ctx->offset = ftell(file);
++#endif
+
+     // compute the total size of the data section, taking into account the alignment
+     {

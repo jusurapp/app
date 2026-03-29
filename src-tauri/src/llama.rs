@@ -37,7 +37,8 @@ fn run_llama_inference(prompt: &str) -> Result<String, String> {
         crate::log::log!("[llama] Loading model: {}", model_path.display());
         let backend = LlamaBackend::init()
             .map_err(|e| format!("Failed to init llama backend: {e}"))?;
-        let model = LlamaModel::load_from_file(&backend, &model_path, &LlamaModelParams::default())
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(0);
+        let model = LlamaModel::load_from_file(&backend, &model_path, &model_params)
             .map_err(|e| format!("Failed to load LLM model: {e}"))?;
         *state_guard = Some(LlamaState { backend, model });
         crate::log::log!("[llama] Model loaded.");

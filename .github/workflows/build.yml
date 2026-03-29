@@ -37,6 +37,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Apply crate patches
+        shell: bash
+        run: cd src-tauri && bash scripts/apply-patches.sh
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
