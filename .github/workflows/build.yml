@@ -148,13 +148,15 @@ jobs:
           APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Jusur.app"
           FRAMEWORKS="$APP/Contents/Frameworks"
           BIN="$APP/Contents/MacOS/jusur"
+          RELEASE_DIR="src-tauri/target/${{ matrix.target }}/release"
           VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
           mkdir -p "$FRAMEWORKS" "src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
 
           dylibbundler -od -b \
             -x "$BIN" \
             -d "$FRAMEWORKS" \
-            -p "@executable_path/../Frameworks/"
+            -p "@executable_path/../Frameworks/" \
+            -s "$RELEASE_DIR"
 
           codesign --force --deep --sign - "$APP"
 
