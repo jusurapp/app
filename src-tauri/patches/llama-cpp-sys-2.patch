@@ -1,6 +1,21 @@
 --- a/build.rs	2006-07-24 09:21:28
 +++ b/build.rs	2026-03-29 12:41:42
-@@ -1020,13 +1020,7 @@
+@@ -117,6 +117,14 @@
+     lib_names
+ }
+
++fn link_or_ignore_exists(src: PathBuf, dst: PathBuf) {
++    match std::fs::hard_link(&src, &dst) {
++        Ok(_) => {}
++        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
++        Err(e) => panic!("failed to hard link {} to {}: {}", src.display(), dst.display(), e),
++    }
++}
++
+ fn extract_lib_assets(out_dir: &Path) -> Vec<PathBuf> {
+     let shared_lib_pattern = if cfg!(windows) {
+         "*.dll"
+@@ -1020,13 +1028,7 @@
              let crt_static = env::var("CARGO_CFG_TARGET_FEATURE")
                  .unwrap_or_default()
                  .contains("crt-static");
@@ -15,6 +30,41 @@
          }
          TargetOs::Linux => {
              println!("cargo:rustc-link-lib=dylib=stdc++");
+@@ -1068,31 +1070,25 @@
+     // copy DLLs to target
+     if build_shared_libs {
+         let libs_assets = extract_lib_assets(&out_dir);
+         for asset in libs_assets {
+             let asset_clone = asset.clone();
+             let filename = asset_clone.file_name().unwrap();
+             let filename = filename.to_str().unwrap();
+             let dst = target_dir.join(filename);
+             debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
+-            if !dst.exists() {
+-                std::fs::hard_link(asset.clone(), dst).unwrap();
+-            }
++            link_or_ignore_exists(asset.clone(), dst);
+
+             // Copy DLLs to examples as well
+             if target_dir.join("examples").exists() {
+                 let dst = target_dir.join("examples").join(filename);
+                 debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
+-                if !dst.exists() {
+-                    std::fs::hard_link(asset.clone(), dst).unwrap();
+-                }
++                link_or_ignore_exists(asset.clone(), dst);
+             }
+
+             // Copy DLLs to target/profile/deps as well for tests
+             let dst = target_dir.join("deps").join(filename);
+             debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
+-            if !dst.exists() {
+-                std::fs::hard_link(asset.clone(), dst).unwrap();
+-            }
++            link_or_ignore_exists(asset.clone(), dst);
+         }
+     }
+ }
 --- a/llama.cpp/ggml/src/gguf.cpp	2026-03-29 22:20:44
 +++ b/llama.cpp/ggml/src/gguf.cpp	2026-03-29 22:20:44
 @@ -319,6 +319,22 @@
@@ -71,3 +121,4 @@
 
      // compute the total size of the data section, taking into account the alignment
      {
+

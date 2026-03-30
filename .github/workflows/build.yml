@@ -139,6 +139,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-Clink-args=/FORCE:MULTIPLE' || '' }}
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.platform == 'ubuntu-22.04' && '-Clink-args=-Wl,--allow-multiple-definition' || '' }}
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-Clink-arg=-Wl,-headerpad_max_install_names' || '' }}
         with:
           args: --target ${{ matrix.target }} --bundles ${{ runner.os == 'macOS' && 'app' || matrix.bundles }}
 
