@@ -38,10 +38,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Apply crate patches
+        shell: bash
+        run: cd src-tauri && bash scripts/apply-patches.sh
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          key: v2
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -163,6 +168,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: "-"
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-Clink-args=/FORCE:MULTIPLE' || '' }}
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ${{ matrix.platform == 'ubuntu-22.04' && '-Clink-args=-Wl,--allow-multiple-definition' || '' }}
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-Clink-arg=-Wl,-headerpad_max_install_names' || '' }}
         with:
           # macOS: post-processing step creates and uploads the DMG manually
           tagName: ${{ runner.os != 'macOS' && github.ref_name || '' }}
@@ -184,10 +190,12 @@ jobs:
           mkdir -p "$FRAMEWORKS" "$(dirname "$DMG")"
 
           # Recursively bundle all non-system Homebrew dylibs
+          RELEASE_DIR="src-tauri/target/${{ matrix.target }}/release"
           dylibbundler -od -b \
             -x "$BIN" \
             -d "$FRAMEWORKS" \
-            -p "@executable_path/../Frameworks/"
+            -p "@executable_path/../Frameworks/" \
+            -s "$RELEASE_DIR"
 
           # Re-sign everything (binary was invalidated by dylibbundler's install_name_tool changes)
           codesign --force --deep --sign - "$APP"
