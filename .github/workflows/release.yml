@@ -143,6 +143,22 @@ jobs:
           echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
 
+      # ggml builds its Vulkan shader compiler via ExternalProject_Add. Under the
+      # default Visual Studio generator MSBuild schedules that sub-project's
+      # configure/build/install steps out of order once --parallel is in play, and
+      # the install step fails on a cmake_install.cmake that does not exist yet.
+      # Ninja honours the step dependencies. Windows-only: the Unix Makefiles
+      # generator used on Linux does not have this problem.
+      - name: Use Ninja generator (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja --yes
+          }
+          ninja --version
+          echo "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
+
       - name: Install npm dependencies
         run: npm ci
 
