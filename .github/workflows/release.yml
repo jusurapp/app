@@ -33,6 +33,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # MSVC cannot create an object file or .pdb past ~250 characters. ggml
+      # builds vulkan-shaders-gen through ExternalProject_Add, which nests a
+      # second build tree under the cargo target dir, and CMake's try-compile
+      # adds two more levels on top of that, enough to blow the limit from
+      # D:\a\app\app\src-tauri\target and fail the compiler check.
+      #
+      # subst gives the target dir a short alias to build through. The real
+      # directory is untouched, so every src-tauri/target/... path in the steps
+      # below (and the rust cache) still resolves normally.
+      - name: Shorten cargo target path (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri\target | Out-Null
+          subst Z: (Resolve-Path src-tauri\target)
+          echo "CARGO_TARGET_DIR=Z:\" >> $env:GITHUB_ENV
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
