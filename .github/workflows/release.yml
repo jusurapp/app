@@ -186,6 +186,8 @@ jobs:
           cp /c/Windows/System32/vcruntime140_1.dll src-tauri/libs/
           # OpenMP runtime (used by llama.cpp)
           cp /c/Windows/System32/vcomp140.dll src-tauri/libs/
+          # Vulkan loader. Windows does not ship this in some cases.
+          cp /c/Windows/System32/vulkan-1.dll src-tauri/libs/
           echo "Bundled DLLs:"
           ls -la src-tauri/libs/
           # Create Tauri config override to include DLLs as resources
