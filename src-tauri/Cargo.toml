@@ -27,13 +27,24 @@ zip = "2"
 tempfile = "3"
 dirs = "6"
 url = "2"
-whisper-rs = "0.16"
 hound = "3"
-llama-cpp-2 = { version = "0.1", features = ["dynamic-link"] }
 encoding_rs = "0.8"
 ffmpeg-next = "7"
 urlencoding = "2"
 chrono = "0.4"
+
+# whisper-rs-sys and llama-cpp-sys-2 each bundle their own ggml, and the linker
+# resolves the duplicate ggml_* symbols arbitrarily (see .cargo/config.toml).
+# Their backends MUST therefore stay in lockstep, enabling vulkan on only one
+# can yield a binary that silently runs on CPU or faults inside the backend.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+whisper-rs = { version = "0.16", features = ["vulkan"] }
+llama-cpp-2 = { version = "0.1", features = ["dynamic-link", "vulkan"] }
+
+# macOS is deliberately left CPU-only for now
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = "0.16"
+llama-cpp-2 = { version = "0.1", features = ["dynamic-link"] }
 
 
 [package.metadata.patch.ffmpeg-sys-next]

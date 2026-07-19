@@ -1,0 +1,8 @@
+# whisper-rs-sys and llama-cpp-sys-2 each bundle their own copy of ggml, so the
+# linker sees duplicate symbols. CI passes the same flag via
+# CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS in .github/workflows/build.yml.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-Clink-args=/FORCE:MULTIPLE"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Clink-args=-Wl,--allow-multiple-definition"]
