@@ -17,8 +17,6 @@ pub struct VideoMetadata {
     pub thumbnail_url: Option<String>,
     #[serde(default)]
     pub author_name: Option<String>,
-    #[serde(default)]
-    pub duration_secs: Option<u64>,
     pub site: String,
     pub created_at: u64,
     pub segment_count: Option<usize>,
@@ -103,7 +101,6 @@ async fn fetch_youtube_metadata(url: &str, video_id: &str) -> Option<VideoMetada
         title,
         thumbnail_url,
         author_name,
-        duration_secs: None,
         site: "youtube".to_string(),
         created_at,
         segment_count: None,
@@ -122,7 +119,7 @@ async fn fetch_metadata_ytdlp(url: &str, video_id: &str, site: &str) -> VideoMet
         "--skip-download",
         "--no-playlist",
         "--print",
-        "%(title)s\n%(uploader)s\n%(duration)s\n%(thumbnail)s",
+        "%(title)s\n%(uploader)s\n%(thumbnail)s",
         url,
     ]);
     #[cfg(target_os = "windows")]
@@ -132,7 +129,7 @@ async fn fetch_metadata_ytdlp(url: &str, video_id: &str, site: &str) -> VideoMet
     }
     let output = cmd.output().await;
 
-    let (title, author_name, duration_secs, thumbnail_url) = match output {
+    let (title, author_name, thumbnail_url) = match output {
         Ok(out) if out.status.success() => {
             let text = String::from_utf8_lossy(&out.stdout);
             let lines: Vec<&str> = text.lines().collect();
@@ -143,11 +140,10 @@ async fn fetch_metadata_ytdlp(url: &str, video_id: &str, site: &str) -> VideoMet
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "Untitled".into());
             let author = lines.get(1).filter(|s| !na(s)).map(|s| s.to_string());
-            let duration = lines.get(2).and_then(|s| s.trim().parse::<u64>().ok());
-            let thumbnail = lines.get(3).filter(|s| !na(s)).map(|s| s.to_string());
-            (title, author, duration, thumbnail)
+            let thumbnail = lines.get(2).filter(|s| !na(s)).map(|s| s.to_string());
+            (title, author, thumbnail)
         }
-        _ => ("Untitled".into(), None, None, None),
+        _ => ("Untitled".into(), None, None),
     };
 
     VideoMetadata {
@@ -156,7 +152,6 @@ async fn fetch_metadata_ytdlp(url: &str, video_id: &str, site: &str) -> VideoMet
         title,
         thumbnail_url,
         author_name,
-        duration_secs,
         site: site.to_string(),
         created_at,
         segment_count: None,

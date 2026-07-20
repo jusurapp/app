@@ -15,7 +15,6 @@ interface VideoMetadata {
   title: string;
   thumbnail_url?: string;
   author_name?: string;
-  duration_secs?: number;
   site: string;
   created_at: number;
   segment_count?: number;
@@ -30,15 +29,6 @@ function formatSpeed(bps: number): string {
   if (bps >= 1024 * 1024) return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`;
   if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
   return `${bps.toFixed(0)} B/s`;
-}
-
-function formatDuration(secs: number): string {
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  if (h > 0)
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function formatRelativeTime(unixSecs: number): string {
@@ -459,13 +449,7 @@ function App() {
                           {item.title}
                         </p>
                         <p className="text-xs text-white/30 mt-1.5">
-                          {[
-                            item.author_name,
-                            item.duration_secs !== undefined
-                              ? formatDuration(item.duration_secs)
-                              : undefined,
-                            formatRelativeTime(item.created_at),
-                          ]
+                          {[item.author_name, formatRelativeTime(item.created_at)]
                             .filter(Boolean)
                             .join(" · ")}
                         </p>
