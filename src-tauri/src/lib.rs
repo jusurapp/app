@@ -6,7 +6,7 @@ mod whisper;
 mod ytdlp;
 
 use axum::{http::Method, routing::post, Router};
-use serde::{Serialize};
+use serde::Serialize;
 use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -140,7 +140,9 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
             TrayIconBuilder::new()
-                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?)
+                .icon(tauri::image::Image::from_bytes(include_bytes!(
+                    "../icons/tray.png"
+                ))?)
                 .menu(&menu)
                 .tooltip("Jusur")
                 .on_menu_event(|app, event| match event.id.as_ref() {

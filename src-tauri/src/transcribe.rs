@@ -489,7 +489,7 @@ async fn transcribe_inner(
         },
     )
     .ok();
-    let segments = translate_segments(&raw_segments, lang).await?;
+    let segments = translate_segments(app, video_id, &raw_segments, lang).await?;
 
     // 5. Cache the result (includes translations), keyed by target language
     let cache_dir = transcription_cache_dir();

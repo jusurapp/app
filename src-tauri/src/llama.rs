@@ -1,6 +1,3 @@
-use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::Emitter;
 use llama_cpp_2::{
     context::params::LlamaContextParams,
     llama_backend::LlamaBackend,
@@ -8,10 +5,15 @@ use llama_cpp_2::{
     model::{params::LlamaModelParams, AddBos, LlamaModel},
     sampling::LlamaSampler,
 };
+use std::path::PathBuf;
+use std::sync::Mutex;
+use tauri::Emitter;
 
+use crate::transcribe::TranslationStatus;
 use crate::ProgressPayload;
 
-const LLAMA_MODEL_URL: &str = "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf";
+const LLAMA_MODEL_URL: &str =
+    "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf";
 const LLAMA_MODEL_FILENAME: &str = "Qwen3-8B-Q4_K_M.gguf";
 const TRANSLATE_BATCH_SIZE: usize = 30;
 
@@ -35,13 +37,29 @@ fn run_llama_inference(prompt: &str) -> Result<String, String> {
     let mut state_guard = LLAMA_STATE.lock().unwrap();
     if state_guard.is_none() {
         crate::log::log!("[llama] Loading model: {}", model_path.display());
-        let backend = LlamaBackend::init()
-            .map_err(|e| format!("Failed to init llama backend: {e}"))?;
-        let model_params = LlamaModelParams::default().with_n_gpu_layers(0);
-        let model = LlamaModel::load_from_file(&backend, &model_path, &model_params)
-            .map_err(|e| format!("Failed to load LLM model: {e}"))?;
+        let backend =
+            LlamaBackend::init().map_err(|e| format!("Failed to init llama backend: {e}"))?;
+
+        // Try offloading all layers to the GPU first, fall back to CPU-only if
+        // the GPU load fails.
+        let model = {
+            let gpu_params = LlamaModelParams::default().with_n_gpu_layers(999);
+            match LlamaModel::load_from_file(&backend, &model_path, &gpu_params) {
+                Ok(m) => {
+                    crate::log::log!("[llama] Model loaded on GPU (all layers offloaded).");
+                    m
+                }
+                Err(gpu_err) => {
+                    crate::log::log!("[llama] GPU load failed ({gpu_err}); falling back to CPU.");
+                    let cpu_params = LlamaModelParams::default().with_n_gpu_layers(0);
+                    let m = LlamaModel::load_from_file(&backend, &model_path, &cpu_params)
+                        .map_err(|e| format!("Failed to load LLM model on CPU: {e}"))?;
+                    crate::log::log!("[llama] Model loaded on CPU.");
+                    m
+                }
+            }
+        };
         *state_guard = Some(LlamaState { backend, model });
-        crate::log::log!("[llama] Model loaded.");
     }
 
     let state = state_guard.as_ref().unwrap();
@@ -51,23 +69,36 @@ fn run_llama_inference(prompt: &str) -> Result<String, String> {
         "<|im_start|>system\n/no_think<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
     );
 
-    let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(std::num::NonZeroU32::new(2048));
-    let mut ctx = state.model
+    let ctx_params = LlamaContextParams::default().with_n_ctx(std::num::NonZeroU32::new(2048));
+    let mut ctx = state
+        .model
         .new_context(&state.backend, ctx_params)
         .map_err(|e| format!("Failed to create LLM context: {e}"))?;
 
-    let tokens = state.model
+    let tokens = state
+        .model
         .str_to_token(&formatted, AddBos::Never)
         .map_err(|e| format!("Failed to tokenize prompt: {e}"))?;
+
+    let n_ctx = ctx.n_ctx();
+    let n_prompt = tokens.len();
+    crate::log::log!(
+        "[llama] Prompt: {} tokens / {} context ({:.0}% full before generation), ~{} tokens headroom for output",
+        n_prompt,
+        n_ctx,
+        n_prompt as f64 / n_ctx as f64 * 100.0,
+        n_ctx as i64 - n_prompt as i64,
+    );
 
     let mut batch = LlamaBatch::new(tokens.len().max(512), 1);
     let last_idx = tokens.len() as i32 - 1;
     for (i, token) in (0_i32..).zip(tokens.into_iter()) {
-        batch.add(token, i, &[0], i == last_idx)
+        batch
+            .add(token, i, &[0], i == last_idx)
             .map_err(|e| format!("Failed to add token to batch: {e}"))?;
     }
-    ctx.decode(&mut batch).map_err(|e| format!("LLM decode failed: {e}"))?;
+    ctx.decode(&mut batch)
+        .map_err(|e| format!("LLM decode failed: {e}"))?;
 
     let mut n_cur = batch.n_tokens();
     let n_max = n_cur + 1024;
@@ -83,15 +114,18 @@ fn run_llama_inference(prompt: &str) -> Result<String, String> {
             break;
         }
 
-        let piece = state.model
+        let piece = state
+            .model
             .token_to_piece(token, &mut decoder, false, None)
             .map_err(|e| format!("token_to_piece failed: {e}"))?;
         output.push_str(&piece);
 
         batch.clear();
-        batch.add(token, n_cur, &[0], true)
+        batch
+            .add(token, n_cur, &[0], true)
             .map_err(|e| format!("Failed to add token: {e}"))?;
-        ctx.decode(&mut batch).map_err(|e| format!("LLM decode failed: {e}"))?;
+        ctx.decode(&mut batch)
+            .map_err(|e| format!("LLM decode failed: {e}"))?;
 
         n_cur += 1;
     }
@@ -110,7 +144,12 @@ fn run_llama_inference(prompt: &str) -> Result<String, String> {
     Ok(s)
 }
 
-async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize, String)], target_lang: &str) -> Result<Vec<String>, String> {
+async fn translate_batch(
+    batch_idx: usize,
+    total_batches: usize,
+    lines: &[(usize, String)],
+    target_lang: &str,
+) -> Result<Vec<String>, String> {
     let numbered: Vec<String> = lines
         .iter()
         .map(|(i, text)| format!("{}. {}", i + 1, text))
@@ -122,7 +161,12 @@ async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize
         numbered.join("\n")
     );
 
-    crate::log::log!("[translate] Batch {}/{}: running inference ({} chars)...", batch_idx, total_batches, prompt.len());
+    crate::log::log!(
+        "[translate] Batch {}/{}: running inference ({} chars)...",
+        batch_idx,
+        total_batches,
+        prompt.len()
+    );
     let start = std::time::Instant::now();
 
     let content = tokio::task::spawn_blocking(move || run_llama_inference(&prompt))
@@ -130,13 +174,25 @@ async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize
         .map_err(|e| format!("spawn_blocking failed: {e}"))??;
 
     let elapsed = start.elapsed();
-    crate::log::log!("[translate] Batch {}/{}: done in {:.1}s", batch_idx, total_batches, elapsed.as_secs_f64());
-    crate::log::log!("[translate] Batch {}/{}: raw response:\n{}", batch_idx, total_batches, content);
+    crate::log::log!(
+        "[translate] Batch {}/{}: done in {:.1}s",
+        batch_idx,
+        total_batches,
+        elapsed.as_secs_f64()
+    );
+    crate::log::log!(
+        "[translate] Batch {}/{}: raw response:\n{}",
+        batch_idx,
+        total_batches,
+        content
+    );
 
     let mut translations: Vec<String> = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         if let Some(pos) = trimmed.find(|c: char| c == '.' || c == ')') {
             let num_part = &trimmed[..pos];
             if num_part.trim().parse::<usize>().is_ok() {
@@ -145,11 +201,22 @@ async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize
         }
     }
 
-    crate::log::log!("[translate] Batch {}/{}: parsed {} translations for {} lines", batch_idx, total_batches, translations.len(), lines.len());
+    crate::log::log!(
+        "[translate] Batch {}/{}: parsed {} translations for {} lines",
+        batch_idx,
+        total_batches,
+        translations.len(),
+        lines.len()
+    );
     Ok(translations)
 }
 
-pub async fn translate_segments(segments: &[serde_json::Value], target_lang: &str) -> Result<Vec<serde_json::Value>, String> {
+pub async fn translate_segments(
+    app: &tauri::AppHandle,
+    video_id: &str,
+    segments: &[serde_json::Value],
+    target_lang: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     if segments.is_empty() {
         return Ok(vec![]);
     }
@@ -160,18 +227,38 @@ pub async fn translate_segments(segments: &[serde_json::Value], target_lang: &st
         .iter()
         .enumerate()
         .map(|(i, seg)| {
-            let text = seg.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_string();
+            let text = seg
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
             (i, text)
         })
         .collect();
 
     let total_batches = (lines.len() + TRANSLATE_BATCH_SIZE - 1) / TRANSLATE_BATCH_SIZE;
-    crate::log::log!("[translate] Starting translation: {} segments in {} batches of {}", segments.len(), total_batches, TRANSLATE_BATCH_SIZE);
+    crate::log::log!(
+        "[translate] Starting translation: {} segments in {} batches of {}",
+        segments.len(),
+        total_batches,
+        TRANSLATE_BATCH_SIZE
+    );
 
     let mut all_translations: Vec<String> = Vec::with_capacity(segments.len());
 
     for (batch_idx, chunk) in lines.chunks(TRANSLATE_BATCH_SIZE).enumerate() {
-        let batch_translations = translate_batch(batch_idx + 1, total_batches, chunk, target_lang).await?;
+        app.emit(
+            "translation-status",
+            TranslationStatus {
+                video_id: video_id.to_string(),
+                message: format!("Translating batch {}/{}...", batch_idx + 1, total_batches),
+            },
+        )
+        .ok();
+
+        let batch_translations =
+            translate_batch(batch_idx + 1, total_batches, chunk, target_lang).await?;
 
         for (j, (_, original)) in chunk.iter().enumerate() {
             let translation = batch_translations
@@ -182,21 +269,29 @@ pub async fn translate_segments(segments: &[serde_json::Value], target_lang: &st
         }
     }
 
-    crate::log::log!("[translate] All done: {} segments translated in {:.1}s", all_translations.len(), total_start.elapsed().as_secs_f64());
+    crate::log::log!(
+        "[translate] All done: {} segments translated in {:.1}s",
+        all_translations.len(),
+        total_start.elapsed().as_secs_f64()
+    );
 
     let enriched: Vec<serde_json::Value> = segments
         .iter()
         .enumerate()
         .map(|(i, seg)| {
             let mut obj = seg.clone();
-            let translation = all_translations
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| {
-                    seg.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string()
-                });
-            obj.as_object_mut()
-                .map(|m| m.insert("translation".to_string(), serde_json::Value::String(translation)));
+            let translation = all_translations.get(i).cloned().unwrap_or_else(|| {
+                seg.get("text")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            });
+            obj.as_object_mut().map(|m| {
+                m.insert(
+                    "translation".to_string(),
+                    serde_json::Value::String(translation),
+                )
+            });
             obj
         })
         .collect();
@@ -215,15 +310,18 @@ pub async fn download_llama_model(app: tauri::AppHandle) -> Result<(), String> {
 
     let model_path = llama_model_path();
     let cache_dir = model_path.parent().unwrap();
-    std::fs::create_dir_all(cache_dir)
-        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
+    std::fs::create_dir_all(cache_dir).map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
-    app.emit("llama-model-progress", ProgressPayload {
-        status: "downloading".into(),
-        message: "Downloading LLM model...".into(),
-        progress: 0.0,
-        speed: None,
-    }).ok();
+    app.emit(
+        "llama-model-progress",
+        ProgressPayload {
+            status: "downloading".into(),
+            message: "Downloading LLM model...".into(),
+            progress: 0.0,
+            speed: None,
+        },
+    )
+    .ok();
 
     let response = reqwest::get(LLAMA_MODEL_URL)
         .await
@@ -242,7 +340,8 @@ pub async fn download_llama_model(app: tauri::AppHandle) -> Result<(), String> {
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Download error: {}", e))?;
         use std::io::Write;
-        file.write_all(&chunk).map_err(|e| format!("Write error: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Write error: {}", e))?;
         downloaded += chunk.len() as u64;
         let now = std::time::Instant::now();
         let elapsed = now.duration_since(last_emit).as_secs_f64();
@@ -253,21 +352,29 @@ pub async fn download_llama_model(app: tauri::AppHandle) -> Result<(), String> {
         }
         if total_size > 0 {
             let pct = (downloaded as f64 / total_size as f64) * 100.0;
-            app.emit("llama-model-progress", ProgressPayload {
-                status: "downloading".into(),
-                message: format!("Downloading LLM model... {:.0}%", pct),
-                progress: pct,
-                speed: Some(current_speed),
-            }).ok();
+            app.emit(
+                "llama-model-progress",
+                ProgressPayload {
+                    status: "downloading".into(),
+                    message: format!("Downloading LLM model... {:.0}%", pct),
+                    progress: pct,
+                    speed: Some(current_speed),
+                },
+            )
+            .ok();
         }
     }
 
-    app.emit("llama-model-progress", ProgressPayload {
-        status: "done".into(),
-        message: "LLM model ready!".into(),
-        progress: 100.0,
-        speed: None,
-    }).ok();
+    app.emit(
+        "llama-model-progress",
+        ProgressPayload {
+            status: "done".into(),
+            message: "LLM model ready!".into(),
+            progress: 100.0,
+            speed: None,
+        },
+    )
+    .ok();
 
     Ok(())
 }

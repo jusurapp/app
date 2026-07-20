@@ -31,17 +31,20 @@ pub async fn download_whisper_model(app: tauri::AppHandle) -> Result<(), String>
 
     let model_path = whisper_model_path();
     let cache_dir = model_path.parent().unwrap();
-    std::fs::create_dir_all(cache_dir)
-        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
+    std::fs::create_dir_all(cache_dir).map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
     let url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
 
-    app.emit("whisper-model-progress", ProgressPayload {
-        status: "downloading".into(),
-        message: "Downloading whisper model...".into(),
-        progress: 0.0,
-        speed: None,
-    }).ok();
+    app.emit(
+        "whisper-model-progress",
+        ProgressPayload {
+            status: "downloading".into(),
+            message: "Downloading whisper model...".into(),
+            progress: 0.0,
+            speed: None,
+        },
+    )
+    .ok();
 
     let response = reqwest::get(url)
         .await
@@ -60,7 +63,8 @@ pub async fn download_whisper_model(app: tauri::AppHandle) -> Result<(), String>
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Download error: {}", e))?;
         use std::io::Write;
-        file.write_all(&chunk).map_err(|e| format!("Write error: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Write error: {}", e))?;
         downloaded += chunk.len() as u64;
         let now = std::time::Instant::now();
         let elapsed = now.duration_since(last_emit).as_secs_f64();
@@ -71,21 +75,29 @@ pub async fn download_whisper_model(app: tauri::AppHandle) -> Result<(), String>
         }
         if total_size > 0 {
             let pct = (downloaded as f64 / total_size as f64) * 100.0;
-            app.emit("whisper-model-progress", ProgressPayload {
-                status: "downloading".into(),
-                message: format!("Downloading whisper model... {:.0}%", pct),
-                progress: pct,
-                speed: Some(current_speed),
-            }).ok();
+            app.emit(
+                "whisper-model-progress",
+                ProgressPayload {
+                    status: "downloading".into(),
+                    message: format!("Downloading whisper model... {:.0}%", pct),
+                    progress: pct,
+                    speed: Some(current_speed),
+                },
+            )
+            .ok();
         }
     }
 
-    app.emit("whisper-model-progress", ProgressPayload {
-        status: "done".into(),
-        message: "Whisper model ready!".into(),
-        progress: 100.0,
-        speed: None,
-    }).ok();
+    app.emit(
+        "whisper-model-progress",
+        ProgressPayload {
+            status: "done".into(),
+            message: "Whisper model ready!".into(),
+            progress: 100.0,
+            speed: None,
+        },
+    )
+    .ok();
 
     Ok(())
 }

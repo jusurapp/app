@@ -35,18 +35,21 @@ async fn download_ytdlp_binary(app: &tauri::AppHandle) -> Result<(), String> {
 
     let binary_path = ytdlp_binary_path();
     let cache_dir = binary_path.parent().unwrap();
-    std::fs::create_dir_all(cache_dir)
-        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
+    std::fs::create_dir_all(cache_dir).map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
     let url = ytdlp_download_url();
     crate::log::log!("[yt-dlp] Downloading from: {}", url);
 
-    app.emit("ytdlp-progress", ProgressPayload {
-        status: "downloading".into(),
-        message: "Downloading yt-dlp...".into(),
-        progress: 0.0,
-        speed: None,
-    }).ok();
+    app.emit(
+        "ytdlp-progress",
+        ProgressPayload {
+            status: "downloading".into(),
+            message: "Downloading yt-dlp...".into(),
+            progress: 0.0,
+            speed: None,
+        },
+    )
+    .ok();
 
     let response = reqwest::get(url)
         .await
@@ -65,7 +68,8 @@ async fn download_ytdlp_binary(app: &tauri::AppHandle) -> Result<(), String> {
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Download error: {}", e))?;
         use std::io::Write;
-        file.write_all(&chunk).map_err(|e| format!("Write error: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Write error: {}", e))?;
         downloaded += chunk.len() as u64;
         let now = std::time::Instant::now();
         let elapsed = now.duration_since(last_emit).as_secs_f64();
@@ -76,22 +80,30 @@ async fn download_ytdlp_binary(app: &tauri::AppHandle) -> Result<(), String> {
         }
         if total_size > 0 {
             let pct = (downloaded as f64 / total_size as f64) * 100.0;
-            app.emit("ytdlp-progress", ProgressPayload {
-                status: "downloading".into(),
-                message: format!("Downloading yt-dlp... {:.0}%", pct),
-                progress: pct,
-                speed: Some(current_speed),
-            }).ok();
+            app.emit(
+                "ytdlp-progress",
+                ProgressPayload {
+                    status: "downloading".into(),
+                    message: format!("Downloading yt-dlp... {:.0}%", pct),
+                    progress: pct,
+                    speed: Some(current_speed),
+                },
+            )
+            .ok();
         }
     }
     drop(file);
 
-    app.emit("ytdlp-progress", ProgressPayload {
-        status: "done".into(),
-        message: "yt-dlp ready!".into(),
-        progress: 100.0,
-        speed: None,
-    }).ok();
+    app.emit(
+        "ytdlp-progress",
+        ProgressPayload {
+            status: "done".into(),
+            message: "yt-dlp ready!".into(),
+            progress: 100.0,
+            speed: None,
+        },
+    )
+    .ok();
 
     // Make executable on Unix
     #[cfg(unix)]
