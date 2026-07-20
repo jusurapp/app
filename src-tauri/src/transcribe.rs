@@ -73,9 +73,12 @@ fn extract_video_id(url: &str) -> Option<String> {
     if let Some((_, v)) = parsed.query_pairs().find(|(k, _)| k == "v") {
         return Some(v.to_string());
     }
-    // Instagram: /reel/xxx/ or /reels/xxx/
+    // Instagram: /reel/xxx/, /reels/xxx/, /p/xxx/ or /tv/xxx/
     let segments: Vec<&str> = parsed.path_segments()?.collect();
-    if let Some(pos) = segments.iter().position(|s| *s == "reel" || *s == "reels") {
+    if let Some(pos) = segments
+        .iter()
+        .position(|s| matches!(*s, "reel" | "reels" | "p" | "tv"))
+    {
         if let Some(id) = segments.get(pos + 1) {
             if !id.is_empty() {
                 return Some(id.to_string());
