@@ -472,15 +472,16 @@ function App() {
                       </div>
                       <div
                         className="flex gap-1 flex-shrink-0"
+                        style={{ marginRight: "16px" }}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button
                           onClick={() => handleRedo(item)}
-                          className="p-1.5 rounded-lg hover:bg-white/10 text-white/35 hover:text-white/70 cursor-pointer"
+                          className="p-2 rounded-lg hover:bg-white/10 text-white/35 hover:text-white/70 cursor-pointer"
                           title="Redo translation"
                         >
                           <svg
-                            className="w-3.5 h-3.5"
+                            className="w-4 h-4"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -495,12 +496,11 @@ function App() {
                         </button>
                         <button
                           onClick={() => handleDelete(item.video_id)}
-                          className="p-1.5 rounded-lg hover:bg-white/10 text-white/35 hover:text-red-400/70 cursor-pointer"
+                          className="p-2 rounded-lg hover:bg-white/10 text-white/35 hover:text-red-400/70 cursor-pointer"
                           title="Delete translation"
-                          style={{ marginRight: "6px" }}
                         >
                           <svg
-                            className="w-3.5 h-3.5"
+                            className="w-4 h-4"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
