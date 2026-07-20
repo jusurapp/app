@@ -318,8 +318,8 @@ function App() {
 
           <button
             onClick={() => invoke("open_url", { url: CHROME_EXTENSION_URL })}
-            className="rounded-xl bg-[#856451] text-white/90 hover:bg-[#9a7661] transition-all text-sm font-medium cursor-pointer"
-            style={{ padding: "8px 20px" }}
+            className="bg-[#856451] text-white/90 hover:bg-[#9a7661] transition-all text-sm font-medium cursor-pointer"
+            style={{ padding: "8px 20px", borderRadius: "7px" }}
           >
             Get Chrome Extension
           </button>
@@ -399,7 +399,11 @@ function App() {
             {Object.values(activeTranslations).map((active) => (
               <div
                 key={active.metadata.video_id}
-                className="border border-[#856451]/40 bg-[#856451]/[0.06] p-3.5 flex gap-3.5 items-center"
+                className="p-3.5 flex gap-3.5 items-center"
+                style={{
+                  background:
+                    "linear-gradient(90deg, rgba(133,100,81,0.16) 0%, rgba(133,100,81,0.05) 55%, rgba(255,255,255,0.02) 100%)",
+                }}
               >
                 <div className="w-28 h-16 overflow-hidden flex-shrink-0 bg-black/40">
                   <Thumbnail url={active.metadata.thumbnail_url} />
@@ -408,7 +412,10 @@ function App() {
                   <p className="text-sm font-medium text-white/90 leading-snug line-clamp-2">
                     {active.metadata.title}
                   </p>
-                  <p className="text-xs text-[#856451]">{active.status}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full border-2 border-[#c79a7f]/30 border-t-[#c79a7f] animate-spin flex-shrink-0" />
+                    <p className="text-xs text-[#c79a7f]">{active.status}</p>
+                  </div>
                 </div>
               </div>
             ))}
