@@ -20,6 +20,8 @@ pub struct VideoMetadata {
     pub site: String,
     pub created_at: u64,
     pub segment_count: Option<usize>,
+    #[serde(default)]
+    pub target_lang: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -28,9 +30,24 @@ pub struct TranslationStatus {
     pub message: String,
 }
 
+fn default_lang() -> String {
+    "English".to_string()
+}
+
+// Turn a target-language name into a filesystem-safe cache-key slug.
+fn lang_slug(lang: &str) -> String {
+    lang.trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
 #[derive(Deserialize)]
 pub struct TranscribeRequest {
     url: String,
+    #[serde(default = "default_lang")]
+    lang: String,
 }
 
 #[derive(Serialize)]
@@ -42,6 +59,12 @@ pub fn transcription_cache_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".cache/jusur/transcriptions")
+}
+
+// Cache path for a translation into a specific target language. Each language
+// gets its own file so switching languages doesn't return a stale result.
+fn translation_cache_path(video_id: &str, lang: &str) -> PathBuf {
+    transcription_cache_dir().join(format!("{}.{}.json", video_id, lang_slug(lang)))
 }
 
 fn extract_video_id(url: &str) -> Option<String> {
@@ -70,7 +93,7 @@ fn detect_site(url: &str) -> &'static str {
     }
 }
 
-/// Fast metadata via YouTube oEmbed API (single HTTP GET, no process spawn).
+// Fast metadata via YouTube oEmbed API (single HTTP GET, no process spawn).
 async fn fetch_youtube_metadata(url: &str, video_id: &str) -> Option<VideoMetadata> {
     let oembed_url = format!(
         "https://www.youtube.com/oembed?url={}&format=json",
@@ -104,10 +127,11 @@ async fn fetch_youtube_metadata(url: &str, video_id: &str) -> Option<VideoMetada
         site: "youtube".to_string(),
         created_at,
         segment_count: None,
+        target_lang: None,
     })
 }
 
-/// Fallback: spawn yt-dlp for metadata (used for Instagram, etc.).
+// Fallback: spawn yt-dlp for metadata (used for Instagram, etc.).
 async fn fetch_metadata_ytdlp(url: &str, video_id: &str, site: &str) -> VideoMetadata {
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -155,6 +179,7 @@ async fn fetch_metadata_ytdlp(url: &str, video_id: &str, site: &str) -> VideoMet
         site: site.to_string(),
         created_at,
         segment_count: None,
+        target_lang: None,
     }
 }
 
@@ -174,7 +199,13 @@ pub async fn transcribe(
     State(app): State<Arc<tauri::AppHandle>>,
     Json(payload): Json<TranscribeRequest>,
 ) -> Json<TranscribeResponse> {
-    crate::log::log!("[Jusur] Transcribe request for: {}", payload.url);
+    crate::log::log!(
+        "[Jusur] Transcribe request for: {} (lang: {})",
+        payload.url,
+        payload.lang
+    );
+
+    let lang = payload.lang.clone();
 
     let video_id = extract_video_id(&payload.url).unwrap_or_else(|| {
         std::time::SystemTime::now()
@@ -185,7 +216,7 @@ pub async fn transcribe(
     });
 
     // Fast path: return cached result immediately without any network calls
-    let cache_path = transcription_cache_dir().join(format!("{}.json", &video_id));
+    let cache_path = translation_cache_path(&video_id, &lang);
     if cache_path.exists() {
         crate::log::log!(
             "[transcribe] Cache hit for video {} — returning immediately",
@@ -200,9 +231,10 @@ pub async fn transcribe(
 
     // Slow path: fetch metadata, download audio, transcribe, translate
     let mut metadata = fetch_video_metadata(&payload.url, &video_id).await;
+    metadata.target_lang = Some(lang.clone());
     app.emit("translation-started", metadata.clone()).ok();
 
-    match transcribe_inner(&app, &payload.url, &video_id).await {
+    match transcribe_inner(&app, &payload.url, &video_id, &lang).await {
         Ok(segments) => {
             metadata.segment_count = Some(segments.len());
 
@@ -227,9 +259,10 @@ async fn transcribe_inner(
     app: &tauri::AppHandle,
     url: &str,
     video_id: &str,
+    lang: &str,
 ) -> Result<Vec<serde_json::Value>, String> {
     // Check cache first
-    let cache_path = transcription_cache_dir().join(format!("{}.json", video_id));
+    let cache_path = translation_cache_path(video_id, lang);
     if cache_path.exists() {
         crate::log::log!("[transcribe] Cache hit for video {}", video_id);
         app.emit(
@@ -444,7 +477,7 @@ async fn transcribe_inner(
         crate::log::log!("[transcribe]   {}: [{}→{}] {}", i + 1, from, to, text);
     }
 
-    // 4. Translate Arabic → English via llama.cpp
+    // 4. Translate Arabic → target language via llama.cpp
     app.emit(
         "translation-status",
         TranslationStatus {
@@ -453,12 +486,12 @@ async fn transcribe_inner(
         },
     )
     .ok();
-    let segments = translate_segments(&raw_segments).await?;
+    let segments = translate_segments(&raw_segments, lang).await?;
 
-    // 5. Cache the result (includes translations)
+    // 5. Cache the result (includes translations), keyed by target language
     let cache_dir = transcription_cache_dir();
     let _ = std::fs::create_dir_all(&cache_dir);
-    let new_cache_path = cache_dir.join(format!("{}.json", video_id));
+    let new_cache_path = translation_cache_path(video_id, lang);
     if let Ok(json) = serde_json::to_string(&segments) {
         let _ = std::fs::write(&new_cache_path, json);
         crate::log::log!("[transcribe] Cached result for video {}", video_id);
@@ -503,33 +536,45 @@ pub fn open_url(url: String) {
 #[tauri::command]
 pub fn delete_translation(video_id: String) {
     let cache_dir = transcription_cache_dir();
-    let _ = std::fs::remove_file(cache_dir.join(format!("{}.json", video_id)));
     let _ = std::fs::remove_file(cache_dir.join(format!("{}.meta.json", video_id)));
+    // Remove every per-language translation cache for this video.
+    let prefix = format!("{}.", video_id);
+    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(&prefix) && name.ends_with(".json") && !name.ends_with(".meta.json")
+            {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
 }
 
 #[tauri::command]
 pub fn redo_translation(app: tauri::AppHandle, video_id: String) {
     tauri::async_runtime::spawn(async move {
-        let cache_path = transcription_cache_dir().join(format!("{}.json", &video_id));
-        let _ = std::fs::remove_file(&cache_path);
-
         let meta_path = transcription_cache_dir().join(format!("{}.meta.json", &video_id));
-        let url = match std::fs::read_to_string(&meta_path)
+        let (url, lang) = match std::fs::read_to_string(&meta_path)
             .ok()
             .and_then(|s| serde_json::from_str::<VideoMetadata>(&s).ok())
-            .map(|m| m.url)
+            .map(|m| (m.url, m.target_lang.unwrap_or_else(default_lang)))
         {
-            Some(u) => u,
+            Some(v) => v,
             None => {
                 crate::log::log!("[redo] Could not read meta for {}", video_id);
                 return;
             }
         };
 
+        let cache_path = translation_cache_path(&video_id, &lang);
+        let _ = std::fs::remove_file(&cache_path);
+
         let mut metadata = fetch_video_metadata(&url, &video_id).await;
+        metadata.target_lang = Some(lang.clone());
         app.emit("translation-started", metadata.clone()).ok();
 
-        match transcribe_inner(&app, &url, &video_id).await {
+        match transcribe_inner(&app, &url, &video_id, &lang).await {
             Ok(segments) => {
                 metadata.segment_count = Some(segments.len());
                 let cache_dir = transcription_cache_dir();

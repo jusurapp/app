@@ -110,14 +110,15 @@ fn run_llama_inference(prompt: &str) -> Result<String, String> {
     Ok(s)
 }
 
-async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize, String)]) -> Result<Vec<String>, String> {
+async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize, String)], target_lang: &str) -> Result<Vec<String>, String> {
     let numbered: Vec<String> = lines
         .iter()
         .map(|(i, text)| format!("{}. {}", i + 1, text))
         .collect();
 
     let prompt = format!(
-        "Translate each numbered line from Arabic to English. Return ONLY the numbered translations, one per line. Do not add any explanation or extra text.\n\n{}",
+        "Translate each numbered line from Arabic to {}. Return ONLY the numbered translations, one per line. Do not add any explanation or extra text.\n\n{}",
+        target_lang,
         numbered.join("\n")
     );
 
@@ -148,7 +149,7 @@ async fn translate_batch(batch_idx: usize, total_batches: usize, lines: &[(usize
     Ok(translations)
 }
 
-pub async fn translate_segments(segments: &[serde_json::Value]) -> Result<Vec<serde_json::Value>, String> {
+pub async fn translate_segments(segments: &[serde_json::Value], target_lang: &str) -> Result<Vec<serde_json::Value>, String> {
     if segments.is_empty() {
         return Ok(vec![]);
     }
@@ -170,7 +171,7 @@ pub async fn translate_segments(segments: &[serde_json::Value]) -> Result<Vec<se
     let mut all_translations: Vec<String> = Vec::with_capacity(segments.len());
 
     for (batch_idx, chunk) in lines.chunks(TRANSLATE_BATCH_SIZE).enumerate() {
-        let batch_translations = translate_batch(batch_idx + 1, total_batches, chunk).await?;
+        let batch_translations = translate_batch(batch_idx + 1, total_batches, chunk, target_lang).await?;
 
         for (j, (_, original)) in chunk.iter().enumerate() {
             let translation = batch_translations
